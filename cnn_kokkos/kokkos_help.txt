@@ -1,0 +1,16 @@
+To install kokkos:
+1. Clone the repo
+2. Inside the repo, make a build directory
+    cd kokkos; mkdir build; cd build;
+3. Run the cmake command (change path to kokkos repo directory)
+    cmake ..  -DCMAKE_CXX_COMPILER=g++  -DCMAKE_INSTALL_PREFIX="/uufs/chpc.utah.edu/common/home/u1193107/cs6235/project/kokkos/kokkos"
+4. Run: make install
+
+To build kokkos:
+1. In the build directory run the cmake command (use same path to repo directory)
+    cmake ..  -DCMAKE_CXX_COMPILER=g++  -DKokkos_ROOT="/uufs/chpc.utah.edu/common/home/u1193107/cs6235/project/kokkos/kokkos"
+2. Run make to build the binary
+
+Running:
+sinfo -M notchpeak -o "%P %n %t" | grep soc-gpu
+srun -M notchpeak --account=soc-gpu-np --partition=soc-gpu-np --nodes=1 --ntasks=1 --gres=gpu --nodelist=notch370 ./example
