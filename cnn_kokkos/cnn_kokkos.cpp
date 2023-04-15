@@ -77,8 +77,8 @@ int main(int argc, char* argv[]) {
             for (unsigned int r = 0; r<R; r ++) {     // filter height
               for (unsigned int s = 0; s < S; s ++) { // filter width
                 //output_seq[n][k][p][q] += input [n][c][ij+r][ii+s] * weight[k][c][r][s];
-                output_seq[n*K*P*Q + k*P*Q + p*Q + q] += h_input[n, c, ij+r, ii+s] 
-                                                         * weight[k, c, r, s];
+                output_seq[n*K*P*Q + k*P*Q + p*Q + q] += h_input(n, c, ij+r, ii+s) 
+                                                         * h_weight(k, c, r, s);
               }
             }
           }
@@ -89,12 +89,14 @@ int main(int argc, char* argv[]) {
 
   // GPU Version
   // Define Range of computation
-  Kokkos::parallel_for("CNN", n, 
-    KOKKOS_LAMBDA (const int& i, int& sum){
+  Kokkos::parallel_for("CNN", N, 
+    KOKKOS_LAMBDA (const int& i){
       d_output(i,0,0,0) = d_input(0,0,0,0) * d_weight(0,0,0,0);
     });
 
-  // Sequential Implementation
+  Kokkos::deep_copy(h_output, d_output);
+
+  // Check output
   for (unsigned int n=0; n<N; n++) {
     for (unsigned int k=0; k<K; k++) {
       for (unsigned int p =0; p<P; p++) {

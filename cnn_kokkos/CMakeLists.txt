@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.16)
 project(CNN_Kokkos CXX)
 
 # We build kokkos as a subdirectory of our project
-add_subdirectory(/uufs/chpc.utah.edu/common/home/u1193107/cs6235/kokkos build/kokkos)
+add_subdirectory(/uufs/chpc.utah.edu/common/home/u1193107/cs6235/kokkos kokkos)
 #find_package(Kokkos REQUIRED)
 
 add_executable(cnn_kokkos cnn_kokkos.cpp)
