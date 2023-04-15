@@ -26,21 +26,27 @@ int main(int argc, char* argv[]) {
 
 
   // Create Views for host and device
-  Kokkos::View<float*
-  
+
+  // Device Views
+  Kokkos::View<float****> d_input("d_input", N, C, H, W);
+  Kokkos::View<float****> d_weight("d_weight", K, C, R, S);
+  Kokkos::View<float****> d_output("d_output", N, K, P, Q);
+
+  // Host Views
+  Kokkos::View<float****>::HostMirror h_input = Kokkos::create_mirror_view(d_input);
+  Kokkos::View<float****>::HostMirror h_weight= Kokkos::create_mirror_view(d_weight);
+  Kokkos::View<float****>::HostMirror h_output= Kokkos::create_mirror_view(d_output);
+
   float *output_seq = new float[N*K*P*Q];
   memset(output_seq,0, N * K * P * Q*sizeof(float));
-  float *output_par = new float[N*K*P*Q];
-  memset(output_par,0, N * K * P * Q*sizeof(float));
-  float *input = new float[N*C*H*W];
-  float *weight = new float[K*C*R*S];
+  memset(h_output.data(),0, N * K * P * Q*sizeof(float));
   
   // Assign initial values
   for(unsigned int n=0; n<N; ++n){
     for(unsigned int c=0; c<C; ++c){
       for(unsigned int h=0; h<H; ++h){
         for(unsigned int w=0; w<W; ++w){
-          input[n*C*H*W + c*H*W + h*W + w] =  ((float)(n+c+h+w));
+          h_input(n,c,h,w) =  ((float)(n+c+h+w));
         }
       }
     }
@@ -50,11 +56,15 @@ int main(int argc, char* argv[]) {
       for (unsigned int r =0; r<R; r++) {
         for (unsigned int s =0; s<S; s++) {
           //weight[k][c][r][s] = ((float) (k+c+r+s));
-          weight[k*C*R*S + c*R*S + r*S + s] = ((float) (k+c+r+s));
+          h_weight(k, c, r, s) = ((float) (k+c+r+s));
         }
       }
     }
   }
+
+  // Copy Host Views to Device Views
+  Kokkos::deep_copy(d_input, h_input);
+  Kokkos::deep_copy(d_weight, h_weight);
 
   // Sequential version
   for(unsigned int n=0; n<N; n++) {                   // minibatch size
@@ -67,8 +77,8 @@ int main(int argc, char* argv[]) {
             for (unsigned int r = 0; r<R; r ++) {     // filter height
               for (unsigned int s = 0; s < S; s ++) { // filter width
                 //output_seq[n][k][p][q] += input [n][c][ij+r][ii+s] * weight[k][c][r][s];
-                output_seq[n*K*P*Q + k*P*Q + p*Q + q] += input[n*C*H*W + c*H*W + (ij+r)*W + ii+s] 
-                                                         * weight[k*C*R*S+c*R*S+r*S+s];
+                output_seq[n*K*P*Q + k*P*Q + p*Q + q] += h_input[n, c, ij+r, ii+s] 
+                                                         * weight[k, c, r, s];
               }
             }
           }
@@ -78,26 +88,26 @@ int main(int argc, char* argv[]) {
   }
 
   // GPU Version
-  // Define data: kokkos uses views
-  const int n = 10;
-
-  //Kokkos::View<int> sum("sum", 0);
-  int sum = 0;
-  Kokkos::parallel_for("CNN", n, KOKKOS_LAMBDA (const int& i, int& sum){sum += i*i;}, sum);
-  printf(
-      "Sum of squares of integers from 0 to %i, "
-      "computed in parallel, is %i\n",
-      n - 1, sum);
+  // Define Range of computation
+  Kokkos::parallel_for("CNN", n, 
+    KOKKOS_LAMBDA (const int& i, int& sum){
+      d_output(i,0,0,0) = d_input(0,0,0,0) * d_weight(0,0,0,0);
+    });
 
   // Sequential Implementation
-  int seqSum = 0;
-  for (int i = 0; i < n; ++i) {
-    seqSum += i * i;
+  for (unsigned int n=0; n<N; n++) {
+    for (unsigned int k=0; k<K; k++) {
+      for (unsigned int p =0; p<P; p++) {
+        for (unsigned int q =0; q<Q; q++) {
+          if(h_output(n, k, p, q) != output_seq[n*K*P*Q + k*P*Q + p*Q + q]) {
+            printf("Incorrect Output\n");
+            break;
+          }
+        }
+      }
+    }
   }
-  printf(
-      "Sum of squares of integers from 0 to %i, "
-      "computed sequentially, is %i\n",
-      n - 1, seqSum);
+
   Kokkos::finalize();
-  return (sum == seqSum) ? 0 : -1;
+  return 0;
 }
