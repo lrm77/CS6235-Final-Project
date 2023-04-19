@@ -10,6 +10,7 @@ project(CNN_Kokkos CXX)
 add_subdirectory(/uufs/chpc.utah.edu/common/home/u1193107/cs6235/kokkos kokkos)
 #find_package(Kokkos REQUIRED)
 
+add_compile_options(-lineinfo -O3)
 add_executable(cnn_kokkos cnn_kokkos.cpp)
 
 # This is the only line required to set up all compiler/linker flags

@@ -4,9 +4,11 @@
  */
 #include <Kokkos_Core.hpp>
 #include <cstdio>
+#include <chrono>
 
 int main(int argc, char* argv[]) {
   Kokkos::initialize(argc, argv);
+  {
   
   auto ex = Kokkos::DefaultExecutionSpace().name();
   printf("Using Execution Space: %s\n", ex);
@@ -66,7 +68,11 @@ int main(int argc, char* argv[]) {
   Kokkos::deep_copy(d_input, h_input);
   Kokkos::deep_copy(d_weight, h_weight);
 
+  Kokkos::Timer timer;
+
   // Sequential version
+  auto seq_start = std::chrono::high_resolution_clock::now();
+
   for(unsigned int n=0; n<N; n++) {                   // minibatch size
     for(unsigned int k=0; k<K; k ++) {                // output feature map
       for(unsigned int c=0; c<C; c ++) {              // input feature map
@@ -87,22 +93,46 @@ int main(int argc, char* argv[]) {
     }
   }
 
+  auto seq_elapsed = std::chrono::high_resolution_clock::now() - seq_start;
+  long long seq_elapsed_microseconds = std::chrono::duration_cast<std::chrono::microseconds>(seq_elapsed).count();
+  printf("COMPUTE_TIME_IN_MICROSECONDS: %lld\n", seq_elapsed_microseconds);
+  double seq_time = timer.seconds()*1000;
+
   // GPU Version
   // Define Range of computation
-  Kokkos::parallel_for("CNN", N, 
-    KOKKOS_LAMBDA (const int& i){
-      d_output(i,0,0,0) = d_input(0,0,0,0) * d_weight(0,0,0,0);
+  auto range = Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0,0,0},{N, K, P*Q}, {0, 8, 0});
+  timer.reset();
+  Kokkos::parallel_for("CNN", range, 
+    KOKKOS_LAMBDA (const int n, const int k, const int pq){
+      unsigned p = pq/Q;
+      unsigned q = pq%Q;
+      float sum = 0.0;
+      float input = 0.0;
+      unsigned ij = p * u; // input height
+      unsigned ii = q * v; // input width
+      for (unsigned c = 0; c<C; c ++) { 
+        for (unsigned r = 0; r<R; r ++) { 
+          for (unsigned s = 0; s < S; s ++) {
+            input = d_input(n, c, ij+r, ii+s);
+            sum +=  input * d_weight(k, c, r, s);
+          }
+        }
+      }
+      d_output(n, k, p, q) = sum;
     });
+  double par_time = timer.seconds()*1000;
 
   Kokkos::deep_copy(h_output, d_output);
 
   // Check output
-  for (unsigned int n=0; n<N; n++) {
-    for (unsigned int k=0; k<K; k++) {
-      for (unsigned int p =0; p<P; p++) {
-        for (unsigned int q =0; q<Q; q++) {
+  bool fail = false;
+  for (unsigned int n=0; n<N && !fail; n++) {
+    for (unsigned int k=0; k<K && !fail; k++) {
+      for (unsigned int p =0; p<P && !fail; p++) {
+        for (unsigned int q =0; q<Q && !fail; q++) {
           if(h_output(n, k, p, q) != output_seq[n*K*P*Q + k*P*Q + p*Q + q]) {
-            printf("Incorrect Output\n");
+            printf("Incorrect Output: h_output(%d, %d, %d, %d) != %f\n", n, k, p, q, output_seq[n*K*P*Q + k*P*Q + p*Q + q]);
+            fail = true;
             break;
           }
         }
@@ -110,6 +140,10 @@ int main(int argc, char* argv[]) {
     }
   }
 
+  if(!fail)
+    printf("Sequential Time: %f, Parallel Time: %f, Speedup: %f\n", seq_time, par_time, seq_time/par_time);
+  delete output_seq;
+  }
   Kokkos::finalize();
   return 0;
 }
