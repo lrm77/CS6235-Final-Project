@@ -14,15 +14,24 @@ int main(int argc, char* argv[]) {
   printf("Using Execution Space: %s\n", ex);
   
   // Define problem sizes
-  int N{128};// = atoi(argv[1]);
-  int C{3};// = atoi(argv[2]);
-  int K{64};// = atoi(argv[3]);
-  int H{112};// = atoi(argv[4]);
-  int W{112};// = atoi(argv[5]);
-  int R{3};// = atoi(argv[6]);
-  int S{3};// = atoi(argv[7]);
-  int u{2};// = atoi(argv[8]);
-  int v{2};// = atoi(argv[9]);
+  //int N{128};// = atoi(argv[1]);
+  //int C{3};// = atoi(argv[2]);
+  //int K{64};// = atoi(argv[3]);
+  //int H{112};// = atoi(argv[4]);
+  //int W{112};// = atoi(argv[5]);
+  //int R{3};// = atoi(argv[6]);
+  //int S{3};// = atoi(argv[7]);
+  //int u{2};// = atoi(argv[8]);
+  //int v{2};// = atoi(argv[9]);
+  int N = atoi(argv[1]);
+  int C = atoi(argv[2]);
+  int K = atoi(argv[3]);
+  int H = atoi(argv[4]);
+  int W = atoi(argv[5]);
+  int R = atoi(argv[6]);
+  int S = atoi(argv[7]);
+  int u = atoi(argv[8]);
+  int v = atoi(argv[9]);
   int P = (H-R)/u + 1;
   int Q = (W-S)/v + 1;
 
@@ -30,14 +39,14 @@ int main(int argc, char* argv[]) {
   // Create Views for host and device
 
   // Device Views
-  Kokkos::View<float****> d_input("d_input", N, C, H, W);
-  Kokkos::View<float****> d_weight("d_weight", K, C, R, S);
-  Kokkos::View<float****> d_output("d_output", N, K, P, Q);
+  Kokkos::View<float****, Kokkos::LayoutRight> d_input("d_input", N, C, H, W);
+  Kokkos::View<float****, Kokkos::LayoutRight> d_weight("d_weight", K, C, R, S);
+  Kokkos::View<float****, Kokkos::LayoutRight> d_output("d_output", N, K, P, Q);
 
   // Host Views
-  Kokkos::View<float****>::HostMirror h_input = Kokkos::create_mirror_view(d_input);
-  Kokkos::View<float****>::HostMirror h_weight= Kokkos::create_mirror_view(d_weight);
-  Kokkos::View<float****>::HostMirror h_output= Kokkos::create_mirror_view(d_output);
+  auto h_input = Kokkos::create_mirror_view(d_input);
+  auto h_weight= Kokkos::create_mirror_view(d_weight);
+  auto h_output= Kokkos::create_mirror_view(d_output);
 
   float *output_seq = new float[N*K*P*Q];
   memset(output_seq,0, N * K * P * Q*sizeof(float));
@@ -68,11 +77,10 @@ int main(int argc, char* argv[]) {
   Kokkos::deep_copy(d_input, h_input);
   Kokkos::deep_copy(d_weight, h_weight);
 
+  // Initialize timer
   Kokkos::Timer timer;
 
   // Sequential version
-  auto seq_start = std::chrono::high_resolution_clock::now();
-
   for(unsigned int n=0; n<N; n++) {                   // minibatch size
     for(unsigned int k=0; k<K; k ++) {                // output feature map
       for(unsigned int c=0; c<C; c ++) {              // input feature map
@@ -93,33 +101,63 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  auto seq_elapsed = std::chrono::high_resolution_clock::now() - seq_start;
-  long long seq_elapsed_microseconds = std::chrono::duration_cast<std::chrono::microseconds>(seq_elapsed).count();
-  printf("COMPUTE_TIME_IN_MICROSECONDS: %lld\n", seq_elapsed_microseconds);
+  // Record sequential implementation in milliseconds
   double seq_time = timer.seconds()*1000;
 
   // GPU Version
   // Define Range of computation
-  auto range = Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0,0,0},{N, K, P*Q}, {0, 8, 0});
+  // Specifies Tile Size - equivalent to block size when using CUDA backend
+  //auto range = Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0,0,0},{P*Q, K/8, N}, {64, 1, 1});
+  // Let Kokkos automatically set block size
+  auto range = Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0,0,0},{P*Q, K/8, N});
   timer.reset();
   Kokkos::parallel_for("CNN", range, 
-    KOKKOS_LAMBDA (const int n, const int k, const int pq){
+    KOKKOS_LAMBDA (const int pq, const int kk, const int n){
       unsigned p = pq/Q;
       unsigned q = pq%Q;
-      float sum = 0.0;
+      unsigned k = kk*8;
+
+      float sum1 = 0.0;
+      float sum2 = 0.0;
+      float sum3 = 0.0;
+      float sum4 = 0.0;
+      float sum5 = 0.0;
+      float sum6 = 0.0;
+      float sum7 = 0.0;
+      float sum8 = 0.0;
+
       float input = 0.0;
+
       unsigned ij = p * u; // input height
       unsigned ii = q * v; // input width
+
       for (unsigned c = 0; c<C; c ++) { 
         for (unsigned r = 0; r<R; r ++) { 
           for (unsigned s = 0; s < S; s ++) {
             input = d_input(n, c, ij+r, ii+s);
-            sum +=  input * d_weight(k, c, r, s);
+            sum1 += input * d_weight(k  , c, r, s);
+            sum2 += input * d_weight(k+1, c, r, s);
+            sum3 += input * d_weight(k+2, c, r, s);
+            sum4 += input * d_weight(k+3, c, r, s);
+            sum5 += input * d_weight(k+4, c, r, s);
+            sum6 += input * d_weight(k+5, c, r, s);
+            sum7 += input * d_weight(k+6, c, r, s);
+            sum8 += input * d_weight(k+7, c, r, s);
           }
         }
       }
-      d_output(n, k, p, q) = sum;
+      d_output(n, k  , p, q) = sum1;
+      d_output(n, k+1, p, q) = sum2;
+      d_output(n, k+2, p, q) = sum3;
+      d_output(n, k+3, p, q) = sum4;
+      d_output(n, k+4, p, q) = sum5;
+      d_output(n, k+5, p, q) = sum6;
+      d_output(n, k+6, p, q) = sum7;
+      d_output(n, k+7, p, q) = sum8;
     });
+
+  // Block until parallel execution is complete
+  Kokkos::fence();
   double par_time = timer.seconds()*1000;
 
   Kokkos::deep_copy(h_output, d_output);
